@@ -273,11 +273,27 @@ function onFile(e){const f=e.target.files[0];e.target.value='';if(!f)return;
   im.onerror=()=>say('This file could not be opened as a photo.');
   im.src=url;}
 $('file').onchange=onFile;$('fileCam').onchange=onFile;
+function thaiAddr(a){const cut=x=>(x||'').replace(/^(ตำบล|แขวง|อำเภอ|เขต|จังหวัด)\s*/,'').trim();
+  const prov=cut(a.state||a.province),sub=cut(a.suburb||a.quarter||a.village||a.neighbourhood||a.hamlet),
+  dist=cut(a.city_district||a.county||a.district||a.city||a.town||a.municipality),p=[];
+  if(/กรุงเทพ|Bangkok/i.test(prov)){if(sub)p.push('แขวง'+sub);if(dist)p.push('เขต'+dist);p.push('กรุงเทพมหานคร')}
+  else{if(sub)p.push('ต.'+sub);if(dist)p.push('อ.'+dist);if(prov)p.push('จ.'+prov)}
+  return p.join(' ');}
+async function lookup(lat,lon){const c=new AbortController(),t=setTimeout(()=>c.abort(),9000);
+  try{const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=16&accept-language=th&lat=${lat}&lon=${lon}`,{signal:c.signal});
+    if(!r.ok)throw new Error('http');const j=await r.json();return thaiAddr(j.address||{})}finally{clearTimeout(t)}}
 $('gps').onclick=()=>{
   if(!navigator.geolocation){$('gpsOut').textContent='GPS is not available in this browser.';return}
   $('gpsOut').textContent='Finding position…';
-  navigator.geolocation.getCurrentPosition(p=>{coords={lat:p.coords.latitude,lon:p.coords.longitude};coordsName=null;$('oGps').checked=true;
-    $('gpsOut').textContent=`Position found: ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}. Type a name and press Add to save both.`;touch()},
+  navigator.geolocation.getCurrentPosition(async p=>{
+    coords={lat:p.coords.latitude,lon:p.coords.longitude};coordsName=null;$('oGps').checked=true;
+    const cs=`${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}`;
+    $('gpsOut').textContent='Position found ('+cs+'). Looking up the place name…';touch();
+    try{const n=await lookup(coords.lat,coords.lon);
+      if(n){$('loc').value=n;$('oLoc').checked=true;$('gpsOut').textContent='Place: '+n+' ('+cs+'). You can edit the name.'}
+      else $('gpsOut').textContent='Position found ('+cs+') but no place name came back. Type a name instead.';
+    }catch(e){$('gpsOut').textContent='Position found ('+cs+'), but the place name needs internet. Type a name instead.'}
+    touch()},
     ()=>{$('gpsOut').textContent='Position unavailable. Allow location access for this page, or type the location name instead.'},
     {enableHighAccuracy:true,timeout:15000});};
 $('save').onclick=()=>{
@@ -288,11 +304,12 @@ $('save').onclick=()=>{
     const name=`${fileName}-stamped.${ext}`;
     try{
       const file=new File([blob],name,{type});
-      if(!window.claude&&navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file]});say('Saved or shared '+name);return}catch(e){if(e&&e.name==='AbortError'){say('Cancelled');return}}}
+      const IOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+      if(!window.claude&&IOS&&navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file]});say('Done. Choose Save Image to keep it in Photos.');return}catch(e){if(e&&e.name==='AbortError'){say('Cancelled');return}}}
       const dl=window.claude&&await claude.use('downloads');
       if(dl){await dl.save({filename:name,data:blob});say('Saved '+name)}
-      else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();
-        say('If nothing downloaded, press and hold the preview image to save it.')}
+      else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(a.href)},4000);
+        say('Saved to your Downloads folder as '+name+'. If nothing downloaded, press and hold the preview to save it.')}
     }catch(err){say(err&&err.code==='declined'?'Save cancelled.':'Could not save here. Press and hold the preview to save it.')}
   },type,(+$('q').value)/100);};
 
